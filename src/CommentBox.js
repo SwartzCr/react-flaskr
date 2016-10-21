@@ -5,12 +5,12 @@ var Comment = React.createClass({
 
   render: function() {
     return (
-      <div className="comment">
+      <li className="comment">
         <h2 className="commentTitle">
           {this.props.title}
         </h2>
         {this.props.children}
-      </div>
+      </li>
     );
   }
 });
@@ -76,18 +76,23 @@ var CommentBox = React.createClass({
   componentDidMount: function() {
     this.getLoggedIn();
     this.loadCommentsFromServer();
-    setInterval(this.loadCommentsFromServer, this.props.pollInterval);
+    //setInterval(this.loadCommentsFromServer, this.props.pollInterval);
   },
-  //TODO figure out why this isn't updating the view
-    handleLogout: function() {
-    this.setState({logged: false});
+  handleLogout: function() {
+    this.setState({loggedIn: false});
+  },
+  removeCommentById: function(id) {
+      let updatedCommentList = this.state.data.filter((comment) => {
+            return comment.id !== parseInt(id, 10);
+      });
+      this.setState({data: updatedCommentList});
   },
   render: function() {
     return (
       <div className="commentBox">
         <LogInOut logged={this.state.loggedIn} onLogout={this.handleLogout}/>
         <h1>Comments</h1>
-        <CommentList data={this.state.data} />
+        <CommentList data={this.state.data} removeCommentById={this.removeCommentById}/>
         <CommentForm onCommentSubmit={this.handleCommentSubmit} />
       </div>
     );
@@ -144,17 +149,37 @@ var LogoutButton = React.createClass({
 });
 
 var CommentList = React.createClass({
+  commentRemove: function(e) {
+      let id = e.target.attributes["data-id"].value;
+      $.ajax({
+          url: '/api/remove',
+        dataType: 'json',
+        cache: false,
+        type: 'POST',
+        data: {id: id},
+        success: function() {
+            this.props.removeCommentById(id);
+        }.bind(this),
+        error: function(xhr, status, err) {
+          console.error("err", status, err.toString());
+        }.bind(this)
+      });
+  },
   render: function() {
-    var commentNodes = this.props.data.map(function(comment) {
+    var commentNodes = this.props.data.map((comment) => {
       return (
         <Comment title={comment.title} key={comment.id}>
-          {comment.text}
+          {comment.text}<br/>
+          {comment.tag}
+          <button onClick={this.commentRemove} data-id={comment.id}>Remove</button>
         </Comment>
       );
-    });
+    })
     return (
-      <div className="commentList">
+      <div className="commentList" class="entries">
+      <ul>
         {commentNodes}
+      </ul>
       </div>
     );
   }
@@ -162,7 +187,7 @@ var CommentList = React.createClass({
 
 var CommentForm = React.createClass({
   getInitialState: function() {
-    return {title: '', text: '', tag: ''};
+    return {title: '', text: '', tag: '', newtag: ''};
   },
   handleTitleChange: function(e) {
     this.setState({title: e.target.value});
@@ -171,34 +196,41 @@ var CommentForm = React.createClass({
     this.setState({text: e.target.value});
   },
   handleTagChange: function(e) {
-    this.setState({tag: e.target.value});
+    this.setState({tag: e.target.value ? e.target.value : ''});
+  },
+  handleNewTagChange: function(e) {
+    this.setState({newtag: e.target.value ? e.target.value : ''});
   },
   handleSubmit: function(e) {
     e.preventDefault();
     var title = this.state.title.trim();
     var text = this.state.text.trim();
+    var tag = this.state.tag.trim();
+    var newtag = this.state.newtag.trim();
     if (!text || !title) {
       return;
     }
-    this.props.onCommentSubmit({title: title, text: text, tag: tag});
-    this.setState({title: '', text: ''});
+    if (tag !== newtag){
+        newtag = "";
+    }
+    this.props.onCommentSubmit({title: title, text: text, tag: tag, new_tag: newtag});
+    this.setState({title: '', text: '', tag: '', newtag: ''});
   },
   render: function() {
     return (
-      <form className="commentForm" onSubmit={this.handleSubmit}>
+      <form className="commentForm" class="add-entry" onSubmit={this.handleSubmit}>
         <input
           type="text"
           placeholder="Title"
           value={this.state.title}
           onChange={this.handleTitleChange}
-        /><br>
-        <input
-          type="text"
+        /><br/>
+        <textarea
           placeholder="Say something..."
           value={this.state.text}
           onChange={this.handleTextChange}
-        /><br>
-        <CommentTag handleChange={this.handleTagChange} /><br>
+        /><br/>
+        <CommentTag handleChange={this.handleTagChange} handleNewTagChange={this.handleNewTagChange} tag={this.state.tag} newtag={this.state.newtag}/><br/>
         <input type="submit" value="Post" />
       </form>
     );
@@ -207,14 +239,17 @@ var CommentForm = React.createClass({
 var TagElement = React.createClass({
     render: function(){
         return (
-          <input type="radio" name="tag" value={this.props.val}>{this.props.val}
+          <div> 
+            <input type="radio" name="tag" value={this.props.val} checked={this.props.checked} />
+            {this.props.label}
+          </div>
         );
     }
 });
               
 var CommentTag = React.createClass({
     getInitialState: function() {
-        return {tags: [], toRender: []};
+        return {tags: [], toRender: [], tag: ""};
     },
     loadTagsFromServer: function() {
       $.ajax({
@@ -230,20 +265,26 @@ var CommentTag = React.createClass({
       });
     },
     componentDidMount: function() {
-      setInterval(this.updateTags, 2000);
-    },
-    updateTags: function() {
       this.loadTagsFromServer();
-      this.setState(toRender: []);
-      //TODO likely tags isn't a simple array
-      for (var i=0; i <this.state.tags.length(); i++) {
-         toRender.push(<TagElement val=this.props.tags[i] />);
-      }
+      //setInterval(this.updateTags, 2000);
+    },
+    handleChange: function(e) {
+        this.props.handleChange(e);
+    },
+    handleNewTagChange: function(e) {
+        this.props.handleNewTagChange(e);
     },
     render: function() {
+        let tags = this.state.tags.map((tag) => {
+            return (
+                    <TagElement val={tag} label={tag} checked={tag === this.props.tag} />
+                );
+        });
+        
         return (
-            <form onClick={this.props.handleChange}>
-              {this.state.tagOptions}
+            <form onClick={this.handleChange}>
+                {tags}
+                <input type="radio" name="tag" value="Other" checked={"Other" === this.props.tag} />Other<input onChange={this.handleNewTagChange} type="text" name="new_tag" value={this.props.newtag} />
             </form>
         );
     }
